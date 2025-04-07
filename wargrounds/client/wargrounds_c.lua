@@ -1,9 +1,15 @@
 local screenW, screenH = guiGetScreenSize()
 local scaleW, scaleH = screenW/1920, screenH/1080
+
+addEvent("wgFixPlayer", true)
+addEvent("wgReceiveHudTimer", true)
+addEvent("wgHideDefaultHud", true)
+addEvent("wgDrawNewHud", true)
+
 local fonts = {
-    main = dxCreateFont("verdana.ttf", 85),
-    medium = dxCreateFont("verdana.ttf", 17),
-    large = dxCreateFont("verdana.ttf", 120)
+    main = dxCreateFont("verdana.ttf", 85) or "default-bold",
+    medium = dxCreateFont("verdana.ttf", 17) or "default",
+    large = dxCreateFont("verdana.ttf", 120) or "default-bold"
 }
 
 local hudState = {
@@ -16,6 +22,7 @@ local hudState = {
 
 local hudComponents = {"elementlist", "playerlist", "race", "teamlist", "timeleft"}
 local hudTimer
+
 local positions = {
     time = {x = screenW * 0.4557, y = screenH * 0.9363, w = screenW * 0.5359, h = screenH * 1.02},
     team1 = {x = screenW * 0.3995, y = screenH * 0.9724, w = screenW * 0.4573, h = screenH * 0.9839},
@@ -27,10 +34,40 @@ local positions = {
     }
 }
 
-addEvent("wgHideDefaultHud", true)
-addEvent("wgDrawNewHud", true)
-addEvent("wgReceiveHudTimer", true)
-addEvent("wgFixPlayer", true)
+local function getTeamFromID(id)
+    for _, team in ipairs(getElementsByType("team")) do
+        if isElement(team) and tostring(getElementData(team, "Side")) == id then
+            return team
+        end
+    end
+    return false
+end
+
+local function wgFixPlayer(player)
+    if not isElement(player) then return end
+    
+    local function removeFromTeam(teamTable)
+        for k, v in ipairs(teamTable) do 
+            if v == player then 
+                table.remove(teamTable, k)
+                break
+            end
+        end
+    end
+    removeFromTeam(hudState.teamPlayers.red)
+    removeFromTeam(hudState.teamPlayers.blue)
+end
+
+addEventHandler("wgFixPlayer", root, wgFixPlayer)
+
+addEventHandler("wgReceiveHudTimer", root, function(ms)
+    if not isTimer(hudTimer) and not isRoundPaused() then
+        hudTimer = setTimer(function() end, ms, 1)
+    else
+        hudState.roundLeft[2] = ms
+    end
+end)
+
 addEventHandler("wgHideDefaultHud", root, function()
     for _, v in ipairs(hudComponents) do
         showRoundHudComponent(v, false)
@@ -40,17 +77,6 @@ end)
 addEventHandler("wgDrawNewHud", root, function()
     hudState.show = true
     hudState.roundLeft[1] = isRoundPaused() and "Pause" or hudState.roundLeft[1]
-end)
-
-addEventHandler("wgReceiveHudTimer", root, function(ms)
-    if not isTimer(hudTimer) and not isRoundPaused() then
-        local r = getRoundMapInfo()
-        if r.modename ~= "lobby" then
-            hudTimer = setTimer(function() end, ms, 1)
-        end
-    else
-        hudState.roundLeft[2] = ms
-    end
 end)
 
 local function handlePlayerTeamChange(player, teamID)
@@ -84,7 +110,7 @@ end)
 addEventHandler("onClientPlayerGameStatusChange", root, function(oldS)
     local newS = getPlayerGameStatus(source)
     if newS == "Die" then 
-        fixPlayer(source)
+        wgFixPlayer(source)
     elseif newS == "Play" then 
         local team = getPlayerTeam(source)
         if team == getTeamFromID("1") then 
@@ -153,28 +179,12 @@ addEventHandler("onClientPauseToggle", root, function(pause)
     end
 end)
 
-addEventHandler("wgFixPlayer", root, function(p)
-    if not isElement(p) then return end
-   
-    local function removeFromTeam(teamTable, player)
-        for k, v in ipairs(teamTable) do 
-            if v == player then 
-                table.remove(teamTable, k)
-                break
-            end
-        end
-    end
-    removeFromTeam(hudState.teamPlayers.red, p)
-    removeFromTeam(hudState.teamPlayers.blue, p)
-end)
-
 local function drawTeamStats(pos, text, r, g, b)
     dxDrawText(text, pos.x + 2, pos.y + 2, pos.w, pos.h, tocolor(0, 0, 0, 255), 0.94 * scaleH, fonts.medium, "center", "center")
     dxDrawText(text, pos.x, pos.y, pos.w, pos.h, tocolor(r, g, b, 255), 0.94 * scaleH, fonts.medium, "center", "center")
 end
 
 local function drawScoreboard(t1, t2, t1Score, t2Score, t1r, t1g, t1b, t2r, t2g, t2b)
-
     dxDrawText(getTeamName(t1).." #000000"..t1Score, positions.score.team1.x + 21, positions.score.team1.y + 1, positions.score.team1.w + 1, positions.score.team1.y + 17, tocolor(0, 0, 0, 255), scaleH/5, fonts.main, "right", "center", false, false, false, true)
     dxDrawText(getTeamName(t1).." #FFFFFF"..t1Score, positions.score.team1.x, positions.score.team1.y, positions.score.team1.w, positions.score.team1.y + 16, tocolor(t1r, t1g, t1b, 255), scaleH/5, fonts.main, "right", "center", false, false, false, true)
     
@@ -185,31 +195,7 @@ local function drawScoreboard(t1, t2, t1Score, t2Score, t1r, t1g, t1b, t2r, t2g,
     dxDrawText("#FFFFFF"..t2Score.." #"..string.format("%02X%02X%02X", t2r, t2g, t2b)..getTeamName(t2), positions.score.team2.x, positions.score.team2.y + 17, positions.score.team2.w, positions.score.team2.y, tocolor(255, 255, 255, 255), scaleH/5, fonts.main, "left", "center", false, false, false, true)
 end
 
-addEventHandler("onClientRender", root, function()
-    if not hudState.trueShow or not hudState.show then return end
-    local r = getRoundMapInfo()
-    local t1 = getTeamFromID("1")
-    local t2 = getTeamFromID("2")
-    if not t1 or not t2 then return end
-    local t1r, t1g, t1b = getTeamColor(t1)
-    local t2r, t2g, t2b = getTeamColor(t2)
-    local scoreType = r.modename == "domination" and "Points" or "Score"
-    local t1Score = getElementData(t1, scoreType) or 0
-    local t2Score = getElementData(t2, scoreType) or 0
-    local timeText = getTimeLeft(hudTimer)
-    dxDrawText(timeText, positions.time.x + 3, positions.time.y + 3, positions.time.w, positions.time.h, tocolor(0, 0, 0, 255), 0.98 * scaleH, fonts.medium, "center", "center")
-    dxDrawText(timeText, positions.time.x, positions.time.y, positions.time.w, positions.time.h, tocolor(255, 255, 255, 255), 0.98 * scaleH, fonts.medium, "center", "center")
-    local aliveRed = #getAlivePlayersInTeam("1")
-    local aliveBlue = #getAlivePlayersInTeam("2")
-    local team1Text = getTeamHP("1").." ("..aliveRed..")"
-    local team2Text = "("..aliveBlue..") "..getTeamHP("2")
-    
-    drawTeamStats(positions.team1, team1Text, t1r, t1g, t1b)
-    drawTeamStats(positions.team2, team2Text, t2r, t2g, t2b)
-    drawScoreboard(t1, t2, t1Score, t2Score, t1r, t1g, t1b, t2r, t2g, t2b)
-end)
-
-function getAlivePlayersInTeam(teamID)
+local function getAlivePlayersInTeam(teamID)
     local alivePlayers = {}
     local team = getTeamFromID(teamID)
     if not team then return alivePlayers end
@@ -222,7 +208,7 @@ function getAlivePlayersInTeam(teamID)
     return alivePlayers
 end
 
-function getTeamHP(teamID)
+local function getTeamHP(teamID)
     local hp = 0
     local team = getTeamFromID(teamID)
     if not team then return hp end
@@ -235,16 +221,7 @@ function getTeamHP(teamID)
     return hp
 end
 
-function getTeamFromID(id)
-    for _, team in ipairs(getElementsByType("team")) do
-        if isElement(team) and tostring(getElementData(team, "Side")) == id then
-            return team
-        end
-    end
-    return false
-end
-
-function getTimeLeft(timer)
+local function getTimeLeft(timer)
     if isTimer(timer) then
         local ms = getTimerDetails(timer)
         local m = math.floor(ms / 60000)
@@ -254,5 +231,37 @@ function getTimeLeft(timer)
     return hudState.roundLeft[1]
 end
 
-function firstUpper(str)
-    return str and (str:gsub("^%l", string.upper)) or ""end
+addEventHandler("onClientRender", root, function()
+    if not hudState.trueShow or not hudState.show then return end
+    
+    local t1 = getTeamFromID("1")
+    local t2 = getTeamFromID("2")
+    if not t1 or not t2 then return end
+    
+    local t1r, t1g, t1b = getTeamColor(t1)
+    local t2r, t2g, t2b = getTeamColor(t2)
+    local scoreType = getRoundMapInfo().modename == "domination" and "Points" or "Score"
+    local t1Score = getElementData(t1, scoreType) or 0
+    local t2Score = getElementData(t2, scoreType) or 0
+    local timeText = getTimeLeft(hudTimer)
+    
+    dxDrawText(timeText, positions.time.x + 3, positions.time.y + 3, positions.time.w, positions.time.h, tocolor(0, 0, 0, 255), 0.98 * scaleH, fonts.medium, "center", "center")
+    dxDrawText(timeText, positions.time.x, positions.time.y, positions.time.w, positions.time.h, tocolor(255, 255, 255, 255), 0.98 * scaleH, fonts.medium, "center", "center")
+    
+    local aliveRed = #getAlivePlayersInTeam("1")
+    local aliveBlue = #getAlivePlayersInTeam("2")
+    local team1Text = getTeamHP("1").." ("..aliveRed..")"
+    local team2Text = "("..aliveBlue..") "..getTeamHP("2")
+    
+    drawTeamStats(positions.team1, team1Text, t1r, t1g, t1b)
+    drawTeamStats(positions.team2, team2Text, t2r, t2g, t2b)
+    drawScoreboard(t1, t2, t1Score, t2Score, t1r, t1g, t1b, t2r, t2g, t2b)
+end)
+
+addEventHandler("onClientResourceStop", resourceRoot, function()
+    for _, font in pairs(fonts) do
+        if type(font) == "userdata" and isElement(font) then
+            destroyElement(font)
+        end
+    end
+end)
